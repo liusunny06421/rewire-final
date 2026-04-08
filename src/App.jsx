@@ -18,7 +18,10 @@ Coach across: HOME (routines, organization), FOOD (nutrition, meal planning, med
 
 Always: meet the user emotionally, break things into tiny steps, acknowledge struggle before solutions, never make user feel broken. Keep responses short and scannable. Use short paragraphs and clear next steps.
 
-If someone is in distress, gently acknowledge and encourage professional support.`;
+If someone is in distress, gently acknowledge and encourage professional support.
+
+If giving a template or routine, write it as: a plain title on its own line, a one-line subtitle on the next line, then 3 to 6 steps each on their own line. Each step should be a single short sentence — no sub-descriptions, no explanations underneath.
+Never use asterisks (**) for bold or any other formatting. Never use markdown headings (#, ##, ###). Never use horizontal rules (---). Never number steps with sub-descriptions below them. Plain text only.`;
 
 const CATEGORIES = [
   {
@@ -750,9 +753,23 @@ function MyRoutinesPage({ routines, onDeleteRoutine, onOpenCategory }) {
                             padding: "14px",
                           }}
                         >
-                          <p style={{ color: "#0f172a", fontSize: "15px", lineHeight: 1.5, fontWeight: 400, marginBottom: "8px" }}>
-                            {item.text}
+                          <p style={{ color: "#0f172a", fontSize: "15px", lineHeight: 1.5, fontWeight: 600, marginBottom: "2px" }}>
+                            {item.title || item.text}
                           </p>
+                          {item.subtitle && (
+                            <p style={{ color: "#64748b", fontSize: "13px", lineHeight: 1.4, fontWeight: 300, marginBottom: "8px" }}>
+                              {item.subtitle}
+                            </p>
+                          )}
+                          {item.steps && item.steps.length > 0 && (
+                            <ul style={{ margin: "0 0 8px 0", padding: "0 0 0 16px", display: "flex", flexDirection: "column", gap: "3px" }}>
+                              {item.steps.map((step, i) => (
+                                <li key={i} style={{ color: "#334155", fontSize: "13px", lineHeight: 1.5 }}>
+                                  {step}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
                             <span style={{ fontSize: "12px", color: "#94a3b8" }}>
                               Added from chat
@@ -1166,14 +1183,97 @@ function OnboardingPage({ userType, onComplete }) {
 }
 
 function AddRoutineModal({ open, initialText, initialCategory, onClose, onSave }) {
-  const [text, setText] = useState(initialText || "");
+  const [title, setTitle] = useState("");
+  const [subtitle, setSubtitle] = useState("");
+  const [stepsText, setStepsText] = useState("");
   const [category, setCategory] = useState(initialCategory || "home");
 
   useEffect(() => {
-    if (open) {
-      setText(initialText || "");
-      setCategory(initialCategory || "home");
+    if (!open) return;
+
+    const raw = (initialText || "").trim();
+
+    const lines = raw
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const cleanedLines = lines.filter((line) => {
+      const lower = line.toLowerCase();
+      return (
+        line !== "---" &&
+        !lower.startsWith("here's a") &&
+        !lower.startsWith("here's a") &&
+        !lower.startsWith("how does that sound") &&
+        !lower.startsWith("want help customizing") &&
+        !lower.startsWith("got it!") &&
+        !lower.startsWith("this fits on") &&
+        !lower.startsWith("you can try")
+      );
+    });
+
+    const parsedSteps = cleanedLines
+      .map((line) =>
+        line
+          .replace(/^#{1,6}\s*/, "")
+          .replace(/^\*\*/, "")
+          .replace(/\*\*$/g, "")
+          .replace(/^\d+[\.\)]\s*/, "")
+          .replace(/^-+\s*/, "")
+          .replace(/\*\*/g, "")
+          .replace(/^Top 3 Priorities\s*\(TODAY Only\)\s*:?\s*/i, "Pick 3 must-do tasks")
+          .replace(/^Morning Routine Steps\s*:?\s*/i, "Do your morning routine in tiny steps")
+          .replace(/^Afternoon "?Next Steps"?\s*:?\s*/i, "List 2 to 3 afternoon next steps")
+          .replace(/^Evening Routine Steps\s*:?\s*/i, "Do your evening routine in tiny steps")
+          .trim()
+      )
+      .filter(
+        (line) =>
+          line &&
+          line.length > 3 &&
+          !/^your visual daily plan template$/i.test(line) &&
+          !/^simple structure$/i.test(line)
+      )
+      .slice(0, 6);
+
+    const joined = [raw, ...parsedSteps].join(" ");
+
+    let suggestedTitle = "";
+    let suggestedSubtitle = "";
+
+    if (/visual daily plan|whiteboard|single page/i.test(joined)) {
+      suggestedTitle = "Use a One-Page Visual Daily Plan";
+      suggestedSubtitle = "Keep your next steps visible all day";
+    } else if (/outside|walk|fresh air/i.test(joined)) {
+      suggestedTitle = "Go for a 15 Minute Walk at Lunch";
+      suggestedSubtitle = "Get outside and reset midday";
+    } else if (/doomscroll/i.test(joined) && /stretch/i.test(joined)) {
+      suggestedTitle = "Stretch for 5 Minutes After Work";
+      suggestedSubtitle = "No phones allowed";
+    } else if (/doomscroll/i.test(joined) && /read/i.test(joined)) {
+      suggestedTitle = "Read When You Get Home From Work";
+      suggestedSubtitle = "Replace doomscrolling with reading";
+    } else if (/pause before reacting|before reacting/i.test(joined)) {
+      suggestedTitle = "Pause Before You Respond";
+      suggestedSubtitle = "Create space before reacting";
+    } else if (/meal prep|prep food/i.test(joined)) {
+      suggestedTitle = "Prep Tomorrow's Food Tonight";
+      suggestedSubtitle = "Make eating easier tomorrow";
+    } else if (/bedtime|sleep/i.test(joined)) {
+      suggestedTitle = "Start a Simple Bedtime Reset";
+      suggestedSubtitle = "Wind down with less friction";
+    } else if (parsedSteps[0]) {
+      suggestedTitle = parsedSteps[0].replace(/[.:].*$/, "").slice(0, 48).trim();
+      suggestedSubtitle = "A clear plan you can come back to";
     }
+
+    if (!suggestedTitle) suggestedTitle = "Simple Daily Routine";
+    if (!suggestedSubtitle) suggestedSubtitle = "A clear plan you can come back to";
+
+    setTitle(suggestedTitle);
+    setSubtitle(suggestedSubtitle);
+    setStepsText(parsedSteps.join("\n"));
+    setCategory(initialCategory || "home");
   }, [open, initialText, initialCategory]);
 
   if (!open) return null;
@@ -1191,22 +1291,60 @@ function AddRoutineModal({ open, initialText, initialCategory, onClose, onSave }
         padding: "24px",
       }}
     >
-      <div className="glass" style={{ width: "100%", maxWidth: "520px", borderRadius: "24px", padding: "24px" }}>
+      <div className="glass" style={{ width: "100%", maxWidth: "560px", borderRadius: "24px", padding: "24px" }}>
         <p style={{ fontSize: "11px", letterSpacing: "2px", color: BLUE_MID, fontWeight: 600, marginBottom: "10px" }}>
-          ADD TO MY ROUTINE
-        </p>
-        <h3 style={{ fontFamily: "'DM Serif Display', serif", fontSize: "30px", color: "#0f172a", marginBottom: "10px", fontStyle: "italic", fontWeight: 400 }}>
-          Save this step
-        </h3>
-        <p style={{ color: "#64748b", fontSize: "14px", lineHeight: 1.6, fontWeight: 300, marginBottom: "18px" }}>
-          You can edit the wording before saving it.
+          SAVE ROUTINE
         </p>
 
+        <h3
+          style={{
+            fontFamily: "'DM Serif Display', serif",
+            fontSize: "30px",
+            color: "#0f172a",
+            marginBottom: "10px",
+            fontStyle: "italic",
+            fontWeight: 400,
+          }}
+        >
+          Make it beautiful
+        </h3>
+
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Routine title"
+            style={{
+              background: "rgba(255,255,255,0.65)",
+              border: "1px solid rgba(147,197,253,0.3)",
+              borderRadius: "14px",
+              padding: "14px 16px",
+              fontSize: "15px",
+              fontFamily: "'DM Sans', sans-serif",
+              color: "#0f172a",
+            }}
+          />
+
+          <input
+            value={subtitle}
+            onChange={(e) => setSubtitle(e.target.value)}
+            placeholder="Short subtitle"
+            style={{
+              background: "rgba(255,255,255,0.65)",
+              border: "1px solid rgba(147,197,253,0.3)",
+              borderRadius: "14px",
+              padding: "14px 16px",
+              fontSize: "15px",
+              fontFamily: "'DM Sans', sans-serif",
+              color: "#0f172a",
+            }}
+          />
+
           <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={4}
+            value={stepsText}
+            onChange={(e) => setStepsText(e.target.value)}
+            rows={6}
+            placeholder="Put one step per line"
             style={{
               background: "rgba(255,255,255,0.65)",
               border: "1px solid rgba(147,197,253,0.3)",
@@ -1259,8 +1397,21 @@ function AddRoutineModal({ open, initialText, initialCategory, onClose, onSave }
 
           <button
             onClick={() => {
-              if (!text.trim()) return;
-              onSave(text.trim(), category);
+              const steps = stepsText
+                .split("\n")
+                .map((step) => step.trim())
+                .filter(Boolean);
+
+              if (!title.trim()) return;
+
+              onSave(
+                {
+                  title: title.trim(),
+                  subtitle: subtitle.trim(),
+                  steps,
+                },
+                category
+              );
             }}
             className="btn-dark"
             style={{
@@ -1478,8 +1629,8 @@ function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialProm
         initialText={pendingRoutineText}
         initialCategory={pendingRoutineCategory}
         onClose={() => setModalOpen(false)}
-        onSave={(text, category) => {
-          onSaveRoutine(text, category);
+        onSave={(routine, category) => {
+          onSaveRoutine(routine, category);
           setModalOpen(false);
         }}
       />
@@ -1541,7 +1692,7 @@ function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialProm
                         fontWeight: 300,
                       }}
                     >
-                      {msg.content}
+                      {msg.content.replace(/\*\*/g, "")}
                     </div>
 
                     {canSave && (
@@ -2001,10 +2152,57 @@ export default function App() {
     if (assessment) saveJSON(STORAGE_KEYS.ASSESSMENT, assessment);
   }, [assessment]);
 
-  function addRoutine(text, category) {
+  function addRoutine(routine, category) {
+    const rawSteps = Array.isArray(routine.steps) ? routine.steps : [];
+
+    const cleanedSteps = rawSteps
+      .map((step) =>
+        step
+          .replace(/^#{1,6}\s*/, "")
+          .replace(/^\d+[\.\)]\s*/, "")
+          .replace(/^-+\s*/, "")
+          .replace(/\*\*/g, "")
+          .replace(/^Switch it up:\s*/i, "")
+          .replace(/^Optional:\s*/i, "")
+          .replace(/^Make it interactive:\s*/i, "")
+          .replace(/^Pair it with something enjoyable:\s*/i, "")
+          .trim()
+      )
+      .filter(Boolean);
+
+    const combinedText = [routine.title || "", routine.subtitle || "", ...cleanedSteps].join(" ");
+
+    let smartTitle = routine.title?.trim() || "";
+    let smartSubtitle = routine.subtitle?.trim() || "";
+
+    if (/visual daily plan|whiteboard|single page/i.test(combinedText)) {
+      smartTitle = "Use a One-Page Visual Daily Plan";
+      smartSubtitle = "Keep your next steps visible all day";
+    } else if (/outside|walk|fresh air/i.test(combinedText)) {
+      smartTitle = "Go for a 15 Minute Walk at Lunch";
+      smartSubtitle = "Get outside and reset midday";
+    } else if (/doomscroll/i.test(combinedText) && /stretch/i.test(combinedText)) {
+      smartTitle = "Stretch for 5 Minutes After Work";
+      smartSubtitle = "No phones allowed";
+    } else if (/doomscroll/i.test(combinedText) && /read/i.test(combinedText)) {
+      smartTitle = "Read When You Get Home From Work";
+      smartSubtitle = "Replace doomscrolling with reading";
+    } else if (/pause before reacting|before reacting/i.test(combinedText)) {
+      smartTitle = "Pause Before You Respond";
+      smartSubtitle = "Create space before reacting";
+    } else if (!smartTitle && cleanedSteps[0]) {
+      smartTitle = cleanedSteps[0].replace(/[.:].*$/, "").slice(0, 48).trim();
+    }
+
+    if (!smartTitle) smartTitle = "Simple Daily Routine";
+    if (!smartSubtitle) smartSubtitle = "A clear plan you can come back to";
+
     const newItem = {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      text,
+      title: smartTitle,
+      subtitle: smartSubtitle,
+      steps: cleanedSteps,
+      category,
       createdAt: new Date().toISOString(),
     };
 
