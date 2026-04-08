@@ -58,6 +58,7 @@ const STORAGE_KEYS = {
   AUTH_EMAIL: "rewire_auth_email_v1",
   ASSESSMENT: "rewire_assessment_v1",
   TRACKING: "rewire_tracking_v1",
+  MEALS: "rewire_meals_v1",
 };
 
 const styles = `
@@ -212,6 +213,47 @@ function getDefaultTracking() {
     chatStarts: [],
     checkIns: [],
   };
+}
+
+function isToday(timestamp) {
+  if (!timestamp) return false;
+  const d = new Date(timestamp);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
+function downscaleImage(file, maxSize = 1024, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Could not load image"));
+      img.onload = () => {
+        const ratio = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const w = Math.round(img.width * ratio);
+        const h = Math.round(img.height * ratio);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function microColor(level) {
+  if (level === "high") return { bg: "rgba(34,197,94,0.12)", fg: "#15803d" };
+  if (level === "moderate") return { bg: "rgba(96,165,250,0.15)", fg: "#1d4ed8" };
+  return { bg: "rgba(148,163,184,0.18)", fg: "#475569" };
 }
 
 function toDisplayDomain(domainId) {
@@ -1421,7 +1463,399 @@ function AddRoutineModal({ open, initialText, initialCategory, onClose, onSave }
   );
 }
 
-function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialPrompt = "", personalization, onTrackChatStart }) {
+function FoodPage({ meals, onAddMeal, onDeleteMeal, onSaveRoutine, onBackToCategories }) {
+  const fileRef = useRef(null);
+  const [note, setNote] = useState("");
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState("");
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planText, setPlanText] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [pendingRoutineText, setPendingRoutineText] = useState("");
+
+  const todayMeals = useMemo(
+    () => meals.filter((m) => isToday(m.timestamp)),
+    [meals]
+  );
+
+  const totals = useMemo(() => {
+    return todayMeals.reduce(
+      (acc, m) => {
+        const n = m.nutrition || {};
+        acc.calories += Number(n.calories) || 0;
+        acc.protein += Number(n.macros?.protein_g) || 0;
+        acc.carbs += Number(n.macros?.carbs_g) || 0;
+        acc.fat += Number(n.macros?.fat_g) || 0;
+        acc.fiber += Number(n.macros?.fiber_g) || 0;
+        if (typeof n.brain_score === "number") {
+          acc.brainSum += n.brain_score;
+          acc.brainCount += 1;
+        }
+        return acc;
+      },
+      { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0, brainSum: 0, brainCount: 0 }
+    );
+  }, [todayMeals]);
+
+  const avgBrain = totals.brainCount
+    ? (totals.brainSum / totals.brainCount).toFixed(1)
+    : "—";
+
+  async function handleFile(file) {
+    if (!file) return;
+    setError("");
+    setAnalyzing(true);
+    try {
+      const dataUrl = await downscaleImage(file, 1024, 0.85);
+      const res = await fetch("/api/vision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: dataUrl, note }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Analysis failed");
+      onAddMeal({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        timestamp: new Date().toISOString(),
+        thumbnail: dataUrl,
+        note,
+        nutrition: data.nutrition,
+      });
+      setNote("");
+      if (fileRef.current) fileRef.current.value = "";
+    } catch (e) {
+      setError(e.message || "Something went wrong");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  async function planTomorrow() {
+    setPlanLoading(true);
+    setPlanText("");
+    setError("");
+    try {
+      const todayLog = todayMeals.map((m) => ({
+        items: m.nutrition?.items,
+        calories: m.nutrition?.calories,
+        macros: m.nutrition?.macros,
+        micros: m.nutrition?.micros,
+        brain_score: m.nutrition?.brain_score,
+      }));
+      const userMessage = todayLog.length
+        ? `Here is what I ate today (JSON):\n${JSON.stringify(todayLog, null, 2)}\n\nPlan tomorrow's meals to support my ADHD brain. Cover any nutrient gaps from today. Give me breakfast, lunch, dinner, and one snack — each with a one-line reason. Be concise and practical.`
+        : `I haven't logged any meals yet. Suggest a simple ADHD-friendly meal plan for tomorrow: breakfast, lunch, dinner, and one snack. Each with a one-line reason. Be concise and practical.`;
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemPrompt:
+            "You are a brain-nutrition coach for adults with ADHD. Focus on protein timing, omega-3, B vitamins, magnesium, choline, and stable blood sugar. Return clear, actionable meal suggestions in plain text. No markdown headings, just short labeled lines.",
+          messages: [{ role: "user", content: userMessage }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Plan request failed");
+      setPlanText(data.reply || "");
+    } catch (e) {
+      setError(e.message || "Something went wrong");
+    } finally {
+      setPlanLoading(false);
+    }
+  }
+
+  function openSavePlanAsRoutine() {
+    if (!planText.trim()) return;
+    setPendingRoutineText(planText.trim());
+    setModalOpen(true);
+  }
+
+  return (
+    <>
+      <AddRoutineModal
+        open={modalOpen}
+        initialText={pendingRoutineText}
+        initialCategory="food"
+        onClose={() => setModalOpen(false)}
+        onSave={(text, category) => {
+          onSaveRoutine(text, category);
+          setModalOpen(false);
+        }}
+      />
+
+      <div style={{ minHeight: "100vh", fontFamily: "'DM Sans', system-ui, sans-serif", position: "relative" }}>
+        <style>{styles}</style>
+        <Swoosh />
+        <div style={{ position: "relative", zIndex: 1, maxWidth: "780px", margin: "0 auto", padding: "44px 24px 80px" }}>
+          <button
+            onClick={onBackToCategories}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: BLUE,
+              fontSize: "13px",
+              cursor: "pointer",
+              padding: 0,
+              marginBottom: "18px",
+            }}
+          >
+            ← Back to categories
+          </button>
+
+          <p style={{ fontSize: "10px", letterSpacing: "2px", color: BLUE_MID, fontWeight: 600, marginBottom: "10px" }}>
+            FOOD & NUTRITION
+          </p>
+          <h1
+            style={{
+              fontFamily: "'DM Serif Display', Georgia, serif",
+              fontSize: "clamp(32px, 4.5vw, 48px)",
+              fontWeight: 400,
+              color: "#0f172a",
+              marginBottom: "10px",
+              letterSpacing: "-1px",
+              fontStyle: "italic",
+              lineHeight: 1.05,
+            }}
+          >
+            Snap a meal, fuel your brain
+          </h1>
+          <p style={{ color: "#64748b", fontSize: "15px", lineHeight: 1.6, fontWeight: 300, marginBottom: "26px" }}>
+            Upload a photo of what you're eating. I'll estimate the nutrition and score how supportive it is for an ADHD brain.
+          </p>
+
+          <div className="glass" style={{ borderRadius: "22px", padding: "22px" }}>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Optional: add a note (e.g. 'half a bowl', 'with olive oil')"
+              rows={2}
+              style={{
+                width: "100%",
+                background: "rgba(255,255,255,0.65)",
+                border: "1px solid rgba(147,197,253,0.3)",
+                borderRadius: "14px",
+                padding: "12px 14px",
+                fontSize: "14px",
+                fontFamily: "'DM Sans', sans-serif",
+                color: "#0f172a",
+                resize: "vertical",
+                marginBottom: "12px",
+              }}
+            />
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(e) => handleFile(e.target.files?.[0])}
+              style={{ display: "none" }}
+            />
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={analyzing}
+              className="btn-dark"
+              style={{
+                width: "100%",
+                background: analyzing ? "rgba(15,23,42,0.5)" : "#0f172a",
+                color: "white",
+                border: "none",
+                borderRadius: "14px",
+                padding: "16px",
+                fontSize: "15px",
+                fontWeight: 500,
+                fontFamily: "'DM Sans', sans-serif",
+                cursor: analyzing ? "default" : "pointer",
+              }}
+            >
+              {analyzing ? "Analyzing meal…" : "📷 Upload meal photo"}
+            </button>
+            {error && (
+              <p style={{ marginTop: "12px", fontSize: "13px", color: "#dc2626" }}>{error}</p>
+            )}
+          </div>
+
+          {todayMeals.length > 0 && (
+            <div className="glass" style={{ borderRadius: "22px", padding: "22px", marginTop: "18px" }}>
+              <p style={{ fontSize: "10px", letterSpacing: "2px", color: BLUE_MID, fontWeight: 600, marginBottom: "12px" }}>
+                TODAY
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "10px" }}>
+                {[
+                  { label: "kcal", value: Math.round(totals.calories) },
+                  { label: "protein", value: `${Math.round(totals.protein)}g` },
+                  { label: "carbs", value: `${Math.round(totals.carbs)}g` },
+                  { label: "fat", value: `${Math.round(totals.fat)}g` },
+                  { label: "brain", value: avgBrain },
+                ].map((s) => (
+                  <div key={s.label} style={{ textAlign: "center" }}>
+                    <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: "22px", color: "#0f172a", fontStyle: "italic" }}>
+                      {s.value}
+                    </div>
+                    <div style={{ fontSize: "10px", letterSpacing: "1.5px", color: "#94a3b8", textTransform: "uppercase", marginTop: "2px" }}>
+                      {s.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "18px" }}>
+            {todayMeals.map((meal) => {
+              const n = meal.nutrition || {};
+              const score = typeof n.brain_score === "number" ? n.brain_score : null;
+              const scoreBg =
+                score == null
+                  ? "rgba(148,163,184,0.18)"
+                  : score >= 7
+                  ? "rgba(34,197,94,0.15)"
+                  : score >= 4
+                  ? "rgba(96,165,250,0.18)"
+                  : "rgba(248,113,113,0.18)";
+              const scoreFg =
+                score == null
+                  ? "#475569"
+                  : score >= 7
+                  ? "#15803d"
+                  : score >= 4
+                  ? "#1d4ed8"
+                  : "#b91c1c";
+              return (
+                <div key={meal.id} className="glass fadein" style={{ borderRadius: "20px", padding: "16px", display: "flex", gap: "14px" }}>
+                  {meal.thumbnail && (
+                    <img
+                      src={meal.thumbnail}
+                      alt="meal"
+                      style={{ width: "92px", height: "92px", borderRadius: "14px", objectFit: "cover", flexShrink: 0 }}
+                    />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
+                      <div style={{ fontSize: "15px", color: "#0f172a", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {(n.items || []).slice(0, 4).join(", ") || "Meal"}
+                      </div>
+                      {score != null && (
+                        <span
+                          style={{
+                            background: scoreBg,
+                            color: scoreFg,
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            padding: "4px 10px",
+                            borderRadius: "999px",
+                            flexShrink: 0,
+                          }}
+                        >
+                          brain {score}/10
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "8px" }}>
+                      {Math.round(Number(n.calories) || 0)} kcal · P {Math.round(Number(n.macros?.protein_g) || 0)}g · C {Math.round(Number(n.macros?.carbs_g) || 0)}g · F {Math.round(Number(n.macros?.fat_g) || 0)}g
+                    </div>
+                    {n.micros && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
+                        {Object.entries(n.micros).map(([k, v]) => {
+                          const c = microColor(v);
+                          return (
+                            <span
+                              key={k}
+                              style={{
+                                background: c.bg,
+                                color: c.fg,
+                                fontSize: "10px",
+                                padding: "3px 8px",
+                                borderRadius: "999px",
+                                textTransform: "lowercase",
+                              }}
+                            >
+                              {k.replace("_", " ")}: {v}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {n.brain_notes && (
+                      <p style={{ fontSize: "12px", color: "#475569", lineHeight: 1.5, fontStyle: "italic" }}>
+                        {n.brain_notes}
+                      </p>
+                    )}
+                    <div style={{ marginTop: "8px" }}>
+                      <button
+                        onClick={() => onDeleteMeal(meal.id)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#94a3b8",
+                          fontSize: "11px",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: "26px" }}>
+            <button
+              onClick={planTomorrow}
+              disabled={planLoading}
+              className="btn-dark"
+              style={{
+                width: "100%",
+                background: planLoading ? "rgba(37,99,235,0.5)" : BLUE,
+                color: "white",
+                border: "none",
+                borderRadius: "14px",
+                padding: "16px",
+                fontSize: "15px",
+                fontWeight: 500,
+                fontFamily: "'DM Sans', sans-serif",
+                cursor: planLoading ? "default" : "pointer",
+              }}
+            >
+              {planLoading ? "Building tomorrow's plan…" : "Plan tomorrow's brain meals"}
+            </button>
+          </div>
+
+          {planText && (
+            <div className="glass fadein" style={{ borderRadius: "20px", padding: "20px", marginTop: "16px" }}>
+              <p style={{ fontSize: "10px", letterSpacing: "2px", color: BLUE_MID, fontWeight: 600, marginBottom: "10px" }}>
+                TOMORROW'S PLAN
+              </p>
+              <div style={{ whiteSpace: "pre-wrap", fontSize: "14px", lineHeight: 1.6, color: "#1e293b", fontWeight: 300 }}>
+                {planText}
+              </div>
+              <button
+                onClick={openSavePlanAsRoutine}
+                style={{
+                  marginTop: "14px",
+                  background: "rgba(255,255,255,0.75)",
+                  border: "1px solid rgba(147,197,253,0.3)",
+                  borderRadius: "999px",
+                  color: BLUE,
+                  cursor: "pointer",
+                  fontSize: "12px",
+                  padding: "8px 14px",
+                }}
+              >
+                + Save as routine
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialPrompt = "", personalization, onTrackChatStart, onSelectFood }) {
   const [activeCategory, setActiveCategory] = useState(initialCategory);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState(initialPrompt);
@@ -1430,8 +1864,62 @@ function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialProm
   const [modalOpen, setModalOpen] = useState(false);
   const [pendingRoutineText, setPendingRoutineText] = useState("");
   const [pendingRoutineCategory, setPendingRoutineCategory] = useState(initialCategory || "home");
+  const [playingIdx, setPlayingIdx] = useState(null);
+  const [loadingAudioIdx, setLoadingAudioIdx] = useState(null);
 
   const bottomRef = useRef(null);
+  const audioRef = useRef(null);
+
+  async function playMessageAudio(idx, text) {
+    if (playingIdx === idx) {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setPlayingIdx(null);
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+      setPlayingIdx(null);
+    }
+    setLoadingAudioIdx(idx);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error("TTS failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      setPlayingIdx(idx);
+      audio.onended = () => {
+        setPlayingIdx(null);
+        audioRef.current = null;
+        URL.revokeObjectURL(url);
+      };
+      audio.onerror = () => {
+        setPlayingIdx(null);
+        audioRef.current = null;
+        URL.revokeObjectURL(url);
+      };
+      await audio.play();
+    } catch (err) {
+      console.error("Voice playback error:", err);
+      setPlayingIdx(null);
+    } finally {
+      setLoadingAudioIdx(null);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (initialCategory) {
@@ -1578,7 +2066,13 @@ function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialProm
               {CATEGORIES.map((cat, i) => (
                 <div
                   key={cat.id}
-                  onClick={() => startChat(cat.id)}
+                  onClick={() => {
+                    if (cat.id === "food" && onSelectFood) {
+                      onSelectFood();
+                      return;
+                    }
+                    startChat(cat.id);
+                  }}
                   className="cat-card"
                   style={{
                     borderRadius: "20px",
@@ -1682,26 +2176,47 @@ function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialProm
                       {msg.content}
                     </div>
 
-                    {canSave && (
-                      <div style={{ display: "flex", justifyContent: "flex-start", marginTop: "8px" }}>
+                    {msg.role === "assistant" && (
+                      <div style={{ display: "flex", justifyContent: "flex-start", marginTop: "8px", gap: "8px", flexWrap: "wrap" }}>
                         <button
-                          onClick={() => {
-                            setPendingRoutineText(msg.content);
-                            setPendingRoutineCategory(activeCategory || "home");
-                            setModalOpen(true);
-                          }}
+                          onClick={() => playMessageAudio(i, msg.content)}
+                          disabled={loadingAudioIdx === i}
+                          aria-label={playingIdx === i ? "Stop voice" : "Play voice"}
                           style={{
-                            background: "rgba(255,255,255,0.75)",
+                            background: playingIdx === i ? BLUE : "rgba(255,255,255,0.75)",
                             border: "1px solid rgba(147,197,253,0.3)",
                             borderRadius: "999px",
-                            color: BLUE,
-                            cursor: "pointer",
+                            color: playingIdx === i ? "white" : BLUE,
+                            cursor: loadingAudioIdx === i ? "wait" : "pointer",
                             fontSize: "12px",
                             padding: "8px 12px",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
                           }}
                         >
-                          + Add to my routine
+                          {loadingAudioIdx === i ? "…" : playingIdx === i ? "■ Stop" : "▶ Listen"}
                         </button>
+                        {canSave && (
+                          <button
+                            onClick={() => {
+                              setPendingRoutineText(msg.content);
+                              setPendingRoutineCategory(activeCategory || "home");
+                              setModalOpen(true);
+                            }}
+                            style={{
+                              background: "rgba(255,255,255,0.75)",
+                              border: "1px solid rgba(147,197,253,0.3)",
+                              borderRadius: "999px",
+                              color: BLUE,
+                              cursor: "pointer",
+                              fontSize: "12px",
+                              padding: "8px 12px",
+                            }}
+                          >
+                            + Add to my routine
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2110,6 +2625,7 @@ export default function App() {
   const [chatPrompt, setChatPrompt] = useState("");
   const [routines, setRoutines] = useState(() => loadJSON(STORAGE_KEYS.ROUTINES, getDefaultRoutines()));
   const [tracking, setTracking] = useState(() => loadJSON(STORAGE_KEYS.TRACKING, getDefaultTracking()));
+  const [meals, setMeals] = useState(() => loadJSON(STORAGE_KEYS.MEALS, []));
 
   const personalization = useMemo(() => {
     if (assessment?.personalization) return assessment.personalization;
@@ -2126,6 +2642,18 @@ export default function App() {
   useEffect(() => {
     saveJSON(STORAGE_KEYS.TRACKING, tracking);
   }, [tracking]);
+
+  useEffect(() => {
+    saveJSON(STORAGE_KEYS.MEALS, meals);
+  }, [meals]);
+
+  function addMeal(meal) {
+    setMeals((prev) => [meal, ...prev]);
+  }
+
+  function deleteMeal(id) {
+    setMeals((prev) => prev.filter((m) => m.id !== id));
+  }
 
   useEffect(() => {
     if (userType) localStorage.setItem(STORAGE_KEYS.USER_TYPE, userType);
@@ -2376,7 +2904,20 @@ export default function App() {
         />
       )}
 
-      {activeTab === "chat" && (
+      {activeTab === "chat" && chatCategory === "food" && (
+        <FoodPage
+          meals={meals}
+          onAddMeal={addMeal}
+          onDeleteMeal={deleteMeal}
+          onSaveRoutine={addRoutine}
+          onBackToCategories={() => {
+            setChatCategory(null);
+            setChatPrompt("");
+          }}
+        />
+      )}
+
+      {activeTab === "chat" && chatCategory !== "food" && (
         <ChatPage
           userType={userType}
           initialCategory={chatCategory}
@@ -2384,6 +2925,7 @@ export default function App() {
           personalization={personalization}
           onTrackChatStart={trackChatStart}
           onSaveRoutine={addRoutine}
+          onSelectFood={() => setChatCategory("food")}
         />
       )}
 
