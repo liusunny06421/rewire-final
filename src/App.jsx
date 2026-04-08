@@ -1789,6 +1789,305 @@ function ChatPage({ userType, onSaveRoutine, initialCategory = null, initialProm
   );
 }
 
+const DEMO_REPLIES = [
+  { keywords: ["hello", "hi", "hey", "hiya"], reply: "Hey! 👋 I'm Alex, a Rewire human coach. How can I help you today?" },
+  { keywords: ["price", "cost", "pricing", "how much", "plan", "subscription"], reply: "Great question! Rewire offers a free tier and a Pro plan starting at $9/month. I'd love to walk you through what's included — want to book a quick call?" },
+  { keywords: ["adhd", "diagnosis", "focus", "attention"], reply: "We work with people at all stages — whether you're newly diagnosed or have been navigating ADHD for years. Rewire is designed to meet you where you are. 💙" },
+  { keywords: ["demo", "show", "see", "tour", "how does it work"], reply: "I'd love to show you around! The best way is a 30-minute live demo — I'll walk you through the AI coach, routines, and the ADHD assessment. Want to book one?" },
+  { keywords: ["book", "call", "schedule", "calendar", "appointment"], reply: "Awesome! You can grab a time that works for you using the booking link below. Looking forward to connecting! 📅" },
+  { keywords: ["routine", "habit", "daily"], reply: "Rewire helps you build ADHD-friendly routines step by step — no overwhelm, no shame. The AI coach breaks everything into tiny, actionable steps." },
+  { keywords: ["anxiety", "stress", "overwhelm", "burnout"], reply: "That sounds really hard. Rewire is built with that in mind — gentle check-ins, no pressure, and a coach that meets you where you're at. You're not alone. 💙" },
+];
+
+const CLINICIANS = [
+  {
+    initials: "SC",
+    color: "#7c3aed",
+    name: "Dr. Sarah Chen, PhD",
+    title: "Clinical Psychologist",
+    credentials: "Harvard Medical School · Board Certified",
+    tags: ["Adult ADHD", "Executive Function", "CBT"],
+    bio: "Dr. Chen completed her doctorate at Harvard and has 12 years of experience treating adult ADHD, with a focus on late-diagnosed women and executive function strategies.",
+  },
+  {
+    initials: "MW",
+    color: "#0369a1",
+    name: "Dr. Marcus Webb, PsyD",
+    title: "Psychiatrist",
+    credentials: "Johns Hopkins University · ABPN Certified",
+    tags: ["ADHD & Anxiety", "Medication Management", "Neurodiversity"],
+    bio: "Dr. Webb trained at Johns Hopkins and specializes in co-occurring ADHD and anxiety disorders. He is certified by the American Board of Psychiatry and Neurology.",
+  },
+  {
+    initials: "AO",
+    color: "#047857",
+    name: "Dr. Amara Osei, MD",
+    title: "Child & Adult Psychiatrist",
+    credentials: "Stanford University · AAP Fellow",
+    tags: ["Lifespan ADHD", "Hormonal ADHD", "Family Systems"],
+    bio: "A Stanford-trained psychiatrist and AAP Fellow, Dr. Osei's research focuses on how ADHD presents across hormonal transitions — puberty, pregnancy, and perimenopause.",
+  },
+  {
+    initials: "PN",
+    color: "#b45309",
+    name: "Dr. Priya Nair, LCSW",
+    title: "Licensed Clinical Social Worker",
+    credentials: "Columbia University · CHADD Specialist",
+    tags: ["RSD", "ADHD Coaching", "Mindfulness"],
+    bio: "Dr. Nair holds an advanced degree from Columbia and is a CHADD-certified ADHD specialist. She integrates ACT and mindfulness to help clients manage rejection sensitive dysphoria.",
+  },
+  {
+    initials: "JH",
+    color: "#be185d",
+    name: "Dr. James Hollis, PhD",
+    title: "Neuropsychologist",
+    credentials: "Mayo Clinic Trained · INS Member",
+    tags: ["ADHD Assessment", "Working Memory", "Brain Health"],
+    bio: "Trained at the Mayo Clinic, Dr. Hollis conducts comprehensive ADHD assessments and specialises in working memory rehabilitation and evidence-based neurocognitive strategies.",
+  },
+];
+
+const DEMO_FALLBACK = "That's a great question! I want to make sure I give you the right answer — want to book a quick call so we can chat properly? 😊";
+
+function DemoPage() {
+  const [messages, setMessages] = useState([
+    { role: "coach", content: "Hi there! 👋 I'm Alex, one of the human coaches at Rewire. This is a demo of our support chat. Ask me anything about Rewire, ADHD coaching, or how we can help — or scroll down to book a call!" },
+  ]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const [formName, setFormName] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+  const [formMessage, setFormMessage] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [clinicianIdx, setClinicianIdx] = useState(0);
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, typing]);
+
+  function getReply(text) {
+    const lower = text.toLowerCase();
+    for (const item of DEMO_REPLIES) {
+      if (item.keywords.some((k) => lower.includes(k))) return item.reply;
+    }
+    return DEMO_FALLBACK;
+  }
+
+  function send() {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+    setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+    setInput("");
+    setTyping(true);
+    setTimeout(() => {
+      setTyping(false);
+      setMessages((prev) => [...prev, { role: "coach", content: getReply(trimmed) }]);
+    }, 1200);
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    setSubmitted(true);
+  }
+
+  const BLUE = "#2563eb";
+  const BLUE_GHOST = "rgba(96,165,250,0.15)";
+
+  return (
+    <div className="fadein" style={{ minHeight: "100vh", padding: "32px 16px 80px", fontFamily: "'DM Sans', sans-serif" }}>
+      <div style={{ maxWidth: "720px", margin: "0 auto" }}>
+
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: "28px" }}>
+          <h1 style={{ fontFamily: "'DM Serif Display', serif", fontStyle: "italic", fontSize: "clamp(1.6rem, 4vw, 2.2rem)", color: "#0f172a", margin: "0 0 8px" }}>
+            Ask a Human
+          </h1>
+          <p style={{ color: "#64748b", fontSize: "15px", margin: 0 }}>
+            Our clinicians are here to help — chat, book a call, or drop us a message.
+          </p>
+        </div>
+
+        {/* Clinician Slider */}
+        <div className="glass" style={{ borderRadius: "20px", padding: "28px 24px", marginBottom: "28px" }}>
+          <p style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.1em", color: "#94a3b8", textTransform: "uppercase", margin: "0 0 16px" }}>Meet our clinicians</p>
+          <div style={{ position: "relative" }}>
+            {/* Card */}
+            {(() => {
+              const c = CLINICIANS[clinicianIdx];
+              return (
+                <div key={clinicianIdx} className="fadein" style={{ display: "flex", gap: "20px", alignItems: "flex-start", flexWrap: "wrap" }}>
+                  {/* Avatar */}
+                  <div style={{ width: "72px", height: "72px", borderRadius: "50%", background: c.color, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "22px", fontWeight: 700, fontFamily: "'DM Sans', sans-serif", flexShrink: 0, boxShadow: `0 0 0 4px ${c.color}22` }}>
+                    {c.initials}
+                  </div>
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: "200px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "4px" }}>
+                      <span style={{ fontWeight: 700, fontSize: "16px", color: "#0f172a", fontFamily: "'DM Sans', sans-serif" }}>{c.name}</span>
+                      <span style={{ fontSize: "11px", background: "rgba(37,99,235,0.1)", color: BLUE, borderRadius: "999px", padding: "2px 10px", fontWeight: 600 }}>{c.title}</span>
+                    </div>
+                    <p style={{ fontSize: "12px", color: "#94a3b8", margin: "0 0 10px", fontWeight: 500 }}>🎓 {c.credentials}</p>
+                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "12px" }}>
+                      {c.tags.map((t) => (
+                        <span key={t} style={{ fontSize: "11px", background: "rgba(255,255,255,0.7)", border: "1px solid rgba(147,197,253,0.45)", borderRadius: "999px", padding: "3px 10px", color: "#475569" }}>{t}</span>
+                      ))}
+                    </div>
+                    <p style={{ fontSize: "13px", color: "#64748b", lineHeight: "1.6", margin: 0 }}>{c.bio}</p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Controls */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "20px" }}>
+              <button onClick={() => setClinicianIdx((i) => (i - 1 + CLINICIANS.length) % CLINICIANS.length)} style={{ background: "rgba(255,255,255,0.7)", border: "1px solid rgba(147,197,253,0.4)", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer", fontSize: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
+              <div style={{ display: "flex", gap: "7px" }}>
+                {CLINICIANS.map((_, i) => (
+                  <button key={i} onClick={() => setClinicianIdx(i)} style={{ width: "8px", height: "8px", borderRadius: "50%", border: "none", cursor: "pointer", padding: 0, background: i === clinicianIdx ? "#0f172a" : "rgba(148,163,184,0.4)", transition: "background 0.2s" }} />
+                ))}
+              </div>
+              <button onClick={() => setClinicianIdx((i) => (i + 1) % CLINICIANS.length)} style={{ background: "rgba(255,255,255,0.7)", border: "1px solid rgba(147,197,253,0.4)", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer", fontSize: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Chat */}
+        <div className="glass" style={{ borderRadius: "20px", overflow: "hidden", marginBottom: "28px" }}>
+          {/* Messages */}
+          <div style={{ padding: "24px 20px", display: "flex", flexDirection: "column", gap: "14px", maxHeight: "380px", overflowY: "auto" }}>
+            {messages.map((msg, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start", gap: "10px", alignItems: "flex-end" }}>
+                {msg.role === "coach" && (
+                  <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: BLUE, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px", flexShrink: 0 }}>
+                    👤
+                  </div>
+                )}
+                <div style={{
+                  maxWidth: "75%",
+                  padding: "12px 16px",
+                  borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                  background: msg.role === "user" ? "#0f172a" : "rgba(255,255,255,0.85)",
+                  color: msg.role === "user" ? "white" : "#0f172a",
+                  border: msg.role === "user" ? "none" : "1px solid rgba(147,197,253,0.35)",
+                  fontSize: "14px",
+                  lineHeight: "1.55",
+                }}>
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {typing && (
+              <div style={{ display: "flex", alignItems: "flex-end", gap: "10px" }}>
+                <div style={{ width: "34px", height: "34px", borderRadius: "50%", background: BLUE, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px", flexShrink: 0 }}>
+                  👤
+                </div>
+                <div style={{ padding: "12px 18px", borderRadius: "18px 18px 18px 4px", background: "rgba(255,255,255,0.85)", border: "1px solid rgba(147,197,253,0.35)", display: "flex", gap: "5px", alignItems: "center" }}>
+                  {[0, 1, 2].map((d) => (
+                    <span key={d} style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#94a3b8", display: "inline-block", animation: `bounce 1.2s ease-in-out ${d * 0.2}s infinite` }} />
+                  ))}
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Input */}
+          <div style={{ borderTop: "1px solid rgba(147,197,253,0.25)", padding: "14px 16px", display: "flex", gap: "10px", background: "rgba(255,255,255,0.4)" }}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+              placeholder="Ask Alex anything…"
+              rows={1}
+              style={{ flex: 1, resize: "none", border: "1px solid rgba(147,197,253,0.4)", borderRadius: "12px", padding: "10px 14px", fontSize: "14px", fontFamily: "'DM Sans', sans-serif", background: "rgba(255,255,255,0.7)", outline: "none", color: "#0f172a" }}
+            />
+            <button
+              onClick={send}
+              style={{ background: "#0f172a", color: "white", border: "none", borderRadius: "12px", padding: "10px 18px", fontSize: "14px", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontWeight: 500 }}
+            >
+              Send
+            </button>
+          </div>
+        </div>
+
+        {/* Book a Call */}
+        <div className="glass" style={{ borderRadius: "20px", padding: "28px 24px", marginBottom: "28px", textAlign: "center" }}>
+          <div style={{ fontSize: "32px", marginBottom: "10px" }}>📅</div>
+          <h2 style={{ fontFamily: "'DM Serif Display', serif", fontStyle: "italic", fontSize: "1.35rem", color: "#0f172a", margin: "0 0 8px" }}>
+            Book a Free 30-min Demo
+          </h2>
+          <p style={{ color: "#64748b", fontSize: "14px", margin: "0 0 20px" }}>
+            Meet with a Rewire coach live — we'll walk you through everything and answer your questions.
+          </p>
+          <a
+            href="https://calendly.com/placeholder"
+            target="_blank"
+            rel="noreferrer"
+            style={{ display: "inline-block", background: "#0f172a", color: "white", borderRadius: "999px", padding: "13px 28px", fontSize: "14px", fontWeight: 600, textDecoration: "none", fontFamily: "'DM Sans', sans-serif" }}
+          >
+            Book a Call →
+          </a>
+        </div>
+
+        {/* Contact Form */}
+        <div className="glass" style={{ borderRadius: "20px", padding: "28px 24px" }}>
+          <h2 style={{ fontFamily: "'DM Serif Display', serif", fontStyle: "italic", fontSize: "1.35rem", color: "#0f172a", margin: "0 0 6px" }}>
+            Send Us a Message
+          </h2>
+          <p style={{ color: "#64748b", fontSize: "14px", margin: "0 0 20px" }}>
+            Not ready to chat? Leave your details and we'll reach out.
+          </p>
+          {submitted ? (
+            <div style={{ textAlign: "center", padding: "24px 0", color: BLUE, fontWeight: 500, fontSize: "15px" }}>
+              ✅ Thanks! We'll be in touch soon.
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <input
+                required
+                placeholder="Your name"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                style={{ border: "1px solid rgba(147,197,253,0.45)", borderRadius: "12px", padding: "12px 14px", fontSize: "14px", fontFamily: "'DM Sans', sans-serif", background: "rgba(255,255,255,0.7)", outline: "none", color: "#0f172a" }}
+              />
+              <input
+                required
+                type="email"
+                placeholder="Email address"
+                value={formEmail}
+                onChange={(e) => setFormEmail(e.target.value)}
+                style={{ border: "1px solid rgba(147,197,253,0.45)", borderRadius: "12px", padding: "12px 14px", fontSize: "14px", fontFamily: "'DM Sans', sans-serif", background: "rgba(255,255,255,0.7)", outline: "none", color: "#0f172a" }}
+              />
+              <textarea
+                required
+                placeholder="What would you like to know?"
+                value={formMessage}
+                onChange={(e) => setFormMessage(e.target.value)}
+                rows={4}
+                style={{ border: "1px solid rgba(147,197,253,0.45)", borderRadius: "12px", padding: "12px 14px", fontSize: "14px", fontFamily: "'DM Sans', sans-serif", background: "rgba(255,255,255,0.7)", outline: "none", color: "#0f172a", resize: "vertical" }}
+              />
+              <button
+                type="submit"
+                style={{ background: "#0f172a", color: "white", border: "none", borderRadius: "999px", padding: "13px 28px", fontSize: "14px", fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", alignSelf: "flex-start" }}
+              >
+                Send Message
+              </button>
+            </form>
+          )}
+        </div>
+
+        <style>{`
+          @keyframes bounce {
+            0%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-6px); }
+          }
+        `}</style>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
  const [screen, setScreen] = useState(() => {
   const savedEmail = localStorage.getItem(STORAGE_KEYS.AUTH_EMAIL);
@@ -2023,6 +2322,7 @@ export default function App() {
                 { id: "dashboard", label: "Dashboard" },
                 { id: "chat", label: "Chat" },
                 { id: "routines", label: "My Routines" },
+                { id: "demo", label: "Ask a Human" },
               ].map((tab) => {
                 const active = activeTab === tab.id;
                 return (
@@ -2086,6 +2386,8 @@ export default function App() {
           onSaveRoutine={addRoutine}
         />
       )}
+
+      {activeTab === "demo" && <DemoPage />}
     </div>
   );
 }
